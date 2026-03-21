@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  /* Tipografía limpia */
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+
+  /* Paleta Enterprise (Zinc & Indigo) */
+  --color-zinc-950: #09090b;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-900: #312e81;
+}
+
+/* Reset vital para que la app ocupe toda la pantalla */
+@layer base {
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden; /* Importante para app de escritorio */
+    background-color: white; /* Base limpia */
+  }
+}
