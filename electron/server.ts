@@ -222,7 +222,7 @@ server.post('/api/complete', (req, res) => {
 // === CATCH-ALL: SPA ROUTING PARA NAVEGADORES ===
 // Cualquier ruta que no sea /api/* devuelve index.html
 // Esto permite que http://IP:3000/#/display funcione en Smart TVs
-server.get('*', (_req, res) => {
+server.get(/(.*)/, (_req, res) => {
   const indexPath = path.join(distPath, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
