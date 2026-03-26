@@ -7,9 +7,6 @@ import { execSync } from 'child_process';
 import { startServer } from './server';
 import { getLocalIp, logger } from './logger';
 
-// NOTA: Como quitamos "type": "module" del package.json, 
-// __dirname ya funciona nativamente. No necesitamos trucos extra.
-
 // Variables globales para las ventanas
 let adminWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
@@ -25,15 +22,31 @@ function isLicenseValid() {
   try {
     const setting = db.prepare("SELECT value FROM settings WHERE key = 'license_expiry'").get() as { value: string } | undefined;
     if (!setting || !setting.value) return false;
-
     const expiryDate = new Date(setting.value);
     const today = new Date();
-    return today < expiryDate; // Devuelve true si aún no caduca
+    return today < expiryDate;
   } catch (error) {
     logger.error(`Error verificando licencia: ${error}`);
     return false;
   }
 }
+
+// Resolver la ruta al index.html según el contexto:
+// - Dev:        raíz del proyecto / dist / index.html
+// - Producción: carpeta del .exe / dist / index.html
+//               (dist llega ahí gracias a extraFiles en package.json)
+const getIndexHtml = (): string => {
+  if (process.env.VITE_DEV_SERVER_URL) {
+    // En dev no se usa loadFile, se usa loadURL — este valor no importa
+    return '';
+  }
+  if (app.isPackaged) {
+    // Junto al .exe: C:\Program Files\NextCall Enterprise\dist\index.html
+    return path.join(path.dirname(app.getPath('exe')), 'dist', 'index.html');
+  }
+  // npm run dev con build previo: dos niveles arriba de dist-electron
+  return path.join(__dirname, '../../dist/index.html');
+};
 
 function createWindows() {
   const displays = screen.getAllDisplays();
@@ -101,7 +114,8 @@ function createWindows() {
     adminWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#/admin`);
     if (displayWindow) displayWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#/display`);
   } else {
-    const indexHtml = path.join(__dirname, '../dist/index.html');
+    const indexHtml = getIndexHtml();
+    logger.info(`📄 Cargando index.html desde: ${indexHtml}`);
     adminWindow.loadFile(indexHtml, { hash: 'admin' });
     if (displayWindow) displayWindow.loadFile(indexHtml, { hash: 'display' });
   }
@@ -117,8 +131,7 @@ app.whenReady().then(() => {
   logger.info(`📁 Logs: ${logger.getLogsDir()}`);
 
   // Configurar perfil de red como Privado para permitir conexiones LAN
-  // (TVs y celulares). Se hace aquí porque NSIS no puede ejecutar
-  // PowerShell con $_ sin conflictos de sintaxis.
+  // Se hace aquí porque NSIS no puede manejar $_ de PowerShell sin conflictos
   if (app.isPackaged) {
     try {
       execSync(
@@ -144,10 +157,8 @@ app.whenReady().then(() => {
       const active = db.prepare("SELECT * FROM turns WHERE status = 'active' LIMIT 1").get();
       const waiting = db.prepare("SELECT * FROM turns WHERE status = 'waiting' ORDER BY id ASC").all();
       const history = db.prepare("SELECT * FROM turns WHERE status = 'completed' ORDER BY id DESC LIMIT 10").all();
-
       const settingsRows = db.prepare("SELECT * FROM settings").all() as { key: string, value: string }[];
       const config = settingsRows.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {});
-
       return { active, waiting, history, config };
     } catch (error) {
       logger.error(`Error DB en get-turns: ${error}`);
@@ -162,40 +173,30 @@ app.whenReady().then(() => {
       const stmt = db.prepare("INSERT INTO turns (code, status) VALUES (?, 'waiting')");
       const info = stmt.run(code);
       const newTurn = db.prepare('SELECT * FROM turns WHERE id = ?').get(info.lastInsertRowid);
-
       broadcastUpdate('db-update');
       return newTurn;
     } catch (e) { return null; }
   });
 
-  // 3. LLAMAR / VOCEAR (LÓGICA REPARADA Y FLEXIBLE)
   ipcMain.handle('call-turn', (_, data) => {
     try {
       let id = typeof data === 'object' ? data.id : data;
       let code = typeof data === 'object' ? data.code : null;
-
       let targetId = id;
       let finalCode = code;
 
-      // === CASO MANUAL ===
-      // Si mandan ID 0 o no hay ID, pero SÍ hay un código manual (ej: "CLIENTE 5")
+      // CASO MANUAL
       if ((!id || id === 0) && code) {
-        // Buscamos si existe previamente
         const existing = db.prepare("SELECT * FROM turns WHERE code = ?").get(code) as { id: number, code: string };
-
         if (existing) {
           targetId = existing.id;
           finalCode = existing.code;
         } else {
-          // NO EXISTE: Lo creamos "al vuelo" directamente como ACTIVO.
-          // 1. Desactivamos el actual
           db.prepare("UPDATE turns SET status = 'completed' WHERE status = 'active'").run();
-          // 2. Insertamos el manual en pantalla gigante
           const stmt = db.prepare("INSERT INTO turns (code, status) VALUES (?, 'active')");
           const info = stmt.run(code);
           targetId = info.lastInsertRowid;
           finalCode = code;
-
           if (adminWindow && !adminWindow.isDestroyed()) {
             adminWindow.webContents.send('remote-voice-trigger', finalCode);
           }
@@ -204,12 +205,10 @@ app.whenReady().then(() => {
         }
       }
 
-      // === CASO NORMAL (Lista de espera o Recall) ===
+      // CASO NORMAL (Lista de espera o Recall)
       if (targetId) {
         const updateTransaction = db.transaction(() => {
-          // 1. Retiramos al que está en pantalla (si hay uno)
           db.prepare("UPDATE turns SET status = 'completed' WHERE status = 'active'").run();
-          // 2. Ponemos en pantalla al objetivo
           db.prepare("UPDATE turns SET status = 'active' WHERE id = ?").run(targetId);
         });
         updateTransaction();
@@ -218,17 +217,14 @@ app.whenReady().then(() => {
           const t = db.prepare("SELECT code FROM turns WHERE id = ?").get(targetId) as { code: string };
           finalCode = t?.code;
         }
-
         if (adminWindow && !adminWindow.isDestroyed()) {
           adminWindow.webContents.send('remote-voice-trigger', finalCode);
         }
-
         broadcastUpdate('db-update');
         return true;
       }
 
-      return false; // Si llegamos aquí, faltaron datos.
-
+      return false;
     } catch (e) {
       logger.error(`Error en call-turn: ${e}`);
       return false;
