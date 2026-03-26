@@ -3,6 +3,7 @@
 import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import path from 'path';
 import db from './database';
+import { execSync } from 'child_process';
 import { startServer } from './server';
 import { getLocalIp, logger } from './logger';
 
@@ -114,6 +115,21 @@ app.whenReady().then(() => {
   logger.info('🚀 NextCall Enterprise iniciando...');
   logger.info(`📁 Datos de usuario: ${app.getPath('userData')}`);
   logger.info(`📁 Logs: ${logger.getLogsDir()}`);
+
+  // Configurar perfil de red como Privado para permitir conexiones LAN
+  // (TVs y celulares). Se hace aquí porque NSIS no puede ejecutar
+  // PowerShell con $_ sin conflictos de sintaxis.
+  if (app.isPackaged) {
+    try {
+      execSync(
+        'powershell -Command "Get-NetConnectionProfile | ForEach-Object { if ($_.NetworkCategory -eq 1) { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private } }"',
+        { timeout: 5000 }
+      );
+      logger.info('✅ Perfil de red configurado como Privado');
+    } catch (e) {
+      logger.warn(`⚠️ No se pudo cambiar perfil de red (no critico): ${e}`);
+    }
+  }
 
   createWindows();
 
