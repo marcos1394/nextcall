@@ -12,20 +12,30 @@ const PORT = 3000;
 server.use(cors());
 server.use(express.json());
 
-// === SERVIR ARCHIVOS ESTÁTICOS (SMART TV WIFI) ===
+// === RUTA AL DIST ===
+// En producción (isPackaged): el dist está como carpeta real junto al .exe
+// gracias a extraFiles. NO está dentro del asar porque express.static
+// no puede leer archivos dentro de un .asar (sistema de archivos virtual).
+//
+// En desarrollo (npm run dev): el dist está en la raíz del proyecto,
+// dos niveles arriba de dist-electron donde vive este archivo compilado.
 const distPath = app.isPackaged
-  ? path.join(process.resourcesPath, 'dist')
+  ? path.join(path.dirname(app.getPath('exe')), 'dist')
   : path.join(__dirname, '../../dist');
 
+logger.info(`📂 distPath resuelto: ${distPath}`);
+logger.info(`📂 distPath existe: ${fs.existsSync(distPath)}`);
+
+// === SERVIR ARCHIVOS ESTÁTICOS (SMART TV / WIFI) ===
 server.use(express.static(distPath));
 
-// Middleware: Loguear cada request HTTP entrante
+// Middleware: loguear cada request HTTP entrante
 server.use((req, _res, next) => {
   logger.info(`HTTP ${req.method} ${req.path} desde ${req.ip}`);
   next();
 });
 
-// CORRECCIÓN 1: _req (Evita error de linter)
+// Redirigir raíz a la pantalla de display
 server.get('/', (_req, res) => {
   res.redirect('/#/display');
 });
@@ -33,9 +43,7 @@ server.get('/', (_req, res) => {
 let adminWin: BrowserWindow | null = null;
 let displayWin: BrowserWindow | null = null;
 
-// === HEALTH CHECK ENDPOINT ===
-// Endpoint ligero para verificar que el servidor está activo
-// Usado por: app móvil, TV, diagnósticos
+// === HEALTH CHECK ===
 const startTime = Date.now();
 
 server.get('/api/health', (_req, res) => {
@@ -50,8 +58,7 @@ server.get('/api/health', (_req, res) => {
   });
 });
 
-// === CONFIG ENDPOINT (Para navegadores/Smart TV) ===
-// Devuelve configuración de personalización + historial para displays HTTP
+// === CONFIG ENDPOINT (Para navegadores / Smart TV) ===
 server.get('/api/config', (_req, res) => {
   try {
     const settingsRows = db.prepare('SELECT * FROM settings').all() as { key: string, value: string }[];
@@ -75,11 +82,10 @@ export const startServer = (mainWindow: BrowserWindow, secondWindow?: BrowserWin
     logger.info(`✅ API escuchando en puerto ${PORT} (bind: 0.0.0.0)`);
   });
 
-  // Manejo de errores del servidor
   httpServer.on('error', (err: NodeJS.ErrnoException) => {
     logger.error(`❌ NO SE PUDO INICIAR EL SERVIDOR: ${err.message}`);
     if (err.code === 'EADDRINUSE') {
-      logger.error(`El puerto ${PORT} ya está en uso por otro proceso. Ciérralo e intenta de nuevo.`);
+      logger.error(`El puerto ${PORT} ya está en uso. Ciérralo e intenta de nuevo.`);
     }
     if (err.code === 'EACCES') {
       logger.error(`Sin permisos para escuchar en el puerto ${PORT}. Ejecuta como administrador.`);
@@ -95,7 +101,7 @@ const notifyAll = (channel: string, data?: any) => {
 
 // --- ENDPOINTS API ---
 
-// 1. OBTENER TURNOS (Para el polling del celular y pantallas)
+// 1. OBTENER TURNOS
 server.get('/api/turns', (_req, res) => {
   try {
     const waiting = db.prepare("SELECT * FROM turns WHERE status = 'waiting' ORDER BY id ASC").all();
@@ -107,10 +113,9 @@ server.get('/api/turns', (_req, res) => {
   }
 });
 
-// 2. CREAR TURNO (Conector POS o botón "Generar Ticket")
+// 2. CREAR TURNO
 server.post('/api/turns', (req, res) => {
   try {
-    // Si el conector envía un folio del POS, lo usamos. Si no, auto-generamos.
     let code = req.body?.code?.toString().trim();
 
     if (!code) {
@@ -130,8 +135,7 @@ server.post('/api/turns', (req, res) => {
   }
 });
 
-// 3. LLAMAR / VOCEAR (Lógica Enterprise Mejorada)
-// Maneja: Siguiente, Recall y Manual
+// 3. LLAMAR / VOCEAR
 server.post('/api/call', (req, res) => {
   const { id, code } = req.body;
 
@@ -139,18 +143,14 @@ server.post('/api/call', (req, res) => {
     let targetId = id;
     let finalCode = code;
 
-    // === CASO A: LLAMADA MANUAL (ID viene como 0) ===
+    // CASO A: LLAMADA MANUAL (id = 0 o sin id)
     if (!id || id === 0) {
-      // 1. Buscamos si el código manual YA existe en la historia (ej: "A-005")
       const existing = db.prepare("SELECT * FROM turns WHERE code = ?").get(code) as { id: number, code: string };
 
       if (existing) {
-        // Si existe, usamos ese ID para reactivarlo
         targetId = existing.id;
         finalCode = existing.code;
       } else {
-        // Si NO existe (ej: "MESA 5"), lo creamos al vuelo directo como 'active'
-        // Primero desactivamos cualquier otro activo para limpieza
         db.prepare("UPDATE turns SET status = 'completed' WHERE status = 'active'").run();
 
         const stmt = db.prepare("INSERT INTO turns (code, status) VALUES (?, 'active')");
@@ -160,7 +160,6 @@ server.post('/api/call', (req, res) => {
 
         logger.info(`📢 Llamado manual creado: ${finalCode}`);
 
-        // Trigger inmediato y salir
         if (adminWin && !adminWin.isDestroyed()) {
           adminWin.webContents.send('remote-voice-trigger', finalCode);
         }
@@ -169,22 +168,15 @@ server.post('/api/call', (req, res) => {
       }
     }
 
-    // === CASO B: LLAMADA NORMAL O RECALL (ID > 0) ===
-    // Usamos una transacción para que sea atómico (todo o nada)
+    // CASO B: LLAMADA NORMAL O RECALL (id > 0)
     const updateTransaction = db.transaction(() => {
-      // 1. Poner el turno ACTIVO actual en 'completed' (si es diferente al target, o incluso si es el mismo para forzar refresh)
       db.prepare("UPDATE turns SET status = 'completed' WHERE status = 'active'").run();
-
-      // 2. Poner el turno TARGET en 'active'
       db.prepare("UPDATE turns SET status = 'active' WHERE id = ?").run(targetId);
     });
 
     updateTransaction();
 
-    // === NOTIFICACIONES ===
-    // 1. VOZ: Le decimos al AdminPanel que hable
     if (adminWin && !adminWin.isDestroyed()) {
-      // Aseguramos tener el código correcto por si acaso
       if (!finalCode) {
         const t = db.prepare("SELECT code FROM turns WHERE id = ?").get(targetId) as { code: string };
         finalCode = t?.code;
@@ -193,10 +185,7 @@ server.post('/api/call', (req, res) => {
     }
 
     logger.info(`📢 Turno llamado: ${finalCode} (ID: ${targetId})`);
-
-    // 2. PANTALLA: Avisamos a todos que la DB cambió
     notifyAll('db-update');
-
     res.json({ success: true });
 
   } catch (e) {
@@ -227,6 +216,12 @@ server.get(/(.*)/, (_req, res) => {
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('App not found. Is the app built?');
+    logger.error(`index.html no encontrado en: ${indexPath}`);
+    res.status(404).send(`
+      <h2>NextCall — Archivo no encontrado</h2>
+      <p>distPath: ${distPath}</p>
+      <p>Existe: ${fs.existsSync(distPath)}</p>
+      <p>Si ves este mensaje, reporta esta ruta al soporte.</p>
+    `);
   }
 });

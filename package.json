@@ -57,11 +57,14 @@
       "output": "release/${version}"
     },
     "files": [
-      "dist",
       "dist-electron",
       "package.json"
     ],
     "extraFiles": [
+      {
+        "from": "dist",
+        "to": "dist"
+      },
       {
         "from": "resources/NextFacturaConnector.msi",
         "to": "installers/NextFacturaConnector.msi"
