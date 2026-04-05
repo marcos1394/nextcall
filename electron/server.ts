@@ -26,19 +26,40 @@ const distPath = app.isPackaged
 logger.info(`📂 distPath resuelto: ${distPath}`);
 logger.info(`📂 distPath existe: ${fs.existsSync(distPath)}`);
 
-// === SERVIR ARCHIVOS ESTÁTICOS (SMART TV / WIFI) ===
-server.use(express.static(distPath));
-
-// Middleware: loguear cada request HTTP entrante
+// Middleware: loguear TODOS los requests (ANTES de static para visibilidad total)
 server.use((req, _res, next) => {
   logger.info(`HTTP ${req.method} ${req.path} desde ${req.ip}`);
   next();
 });
 
-// Redirigir raíz a la pantalla de display
-server.get('/', (_req, res) => {
-  res.redirect('/#/display');
-});
+// === SERVIR ARCHIVOS ESTÁTICOS (SMART TV / WIFI) ===
+server.use(express.static(distPath));
+
+// Helper para servir index.html de forma robusta y compatible con cualquier navegador
+const serveIndex = (_req: express.Request, res: express.Response) => {
+  const indexPath = path.resolve(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(indexPath);
+  } else {
+    logger.error(`index.html no encontrado en: ${indexPath}`);
+    res.status(404).send(`
+      <h2>NextCall — Archivo no encontrado</h2>
+      <p>distPath: ${distPath}</p>
+      <p>Existe: ${fs.existsSync(distPath)}</p>
+      <p>Si ves este mensaje, reporta esta ruta al soporte.</p>
+    `);
+  }
+};
+
+// === RUTAS SPA EXPLÍCITAS ===
+// Navegadores de Smart TV (Hisense VIDAA, LG WebOS, Samsung Tizen) a veces
+// no manejan bien los hash fragments en redirects (#/display).
+// Servimos index.html directamente para que React Router/HashRouter resuelva la vista.
+server.get('/', serveIndex);
+server.get('/display', serveIndex);
+server.get('/admin', serveIndex);
 
 let adminWin: BrowserWindow | null = null;
 let displayWin: BrowserWindow | null = null;
@@ -210,18 +231,5 @@ server.post('/api/complete', (req, res) => {
 
 // === CATCH-ALL: SPA ROUTING PARA NAVEGADORES ===
 // Cualquier ruta que no sea /api/* devuelve index.html
-// Esto permite que http://IP:3000/#/display funcione en Smart TVs
-server.get(/(.*)/, (_req, res) => {
-  const indexPath = path.join(distPath, 'index.html');
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    logger.error(`index.html no encontrado en: ${indexPath}`);
-    res.status(404).send(`
-      <h2>NextCall — Archivo no encontrado</h2>
-      <p>distPath: ${distPath}</p>
-      <p>Existe: ${fs.existsSync(distPath)}</p>
-      <p>Si ves este mensaje, reporta esta ruta al soporte.</p>
-    `);
-  }
-});
+// Compatible con Smart TVs, celulares y cualquier navegador
+server.get(/(.*)/, serveIndex);

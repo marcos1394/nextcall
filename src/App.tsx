@@ -23,7 +23,7 @@ function App(): JSX.Element {
 function HomeMenu() {
   return (
     <div className="h-screen w-screen bg-slate-900 flex flex-col items-center justify-center gap-8 text-white">
-      <h1 className="text-5xl font-bold tracking-tighter">RestTurnos <span className="text-blue-500">Pro</span></h1>
+      <h1 className="text-5xl font-bold tracking-tighter">Next<span className="text-blue-500">Call</span></h1>
       <div className="flex gap-4">
         <Link to="/admin" className="px-8 py-4 bg-blue-600 rounded-xl font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-500/30">
           Entrar como Admin

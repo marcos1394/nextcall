@@ -24,6 +24,10 @@ export const useTurnSystemHttp = () => {
   const [isLocked, setIsLocked] = useState(true);
   const [metrics, setMetrics] = useState({ totalServed: 0, avgWaitTime: '0 min' });
 
+  // Tracking de cambio de turno para disparar voz en el navegador
+  const [lastCalledCode, setLastCalledCode] = useState<string | null>(null);
+  const prevTurnIdRef = useRef<number | null>(null);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const baseUrl = useRef(getBaseUrl());
 
@@ -35,11 +39,16 @@ export const useTurnSystemHttp = () => {
       if (!res.ok) return;
       const data = await res.json();
 
-      setActiveTurn(data.active || null);
-      setWaitingList(data.waiting || []);
+      const newActive: Turn | null = data.active || null;
 
-      // La API /api/turns no devuelve historial; usamos un array vacío
-      // Se podría extender la API, pero por ahora mantenemos consistencia
+      // Detectar cambio de turno activo para disparar voz
+      if (newActive && newActive.id !== prevTurnIdRef.current) {
+        setLastCalledCode(newActive.code);
+      }
+      prevTurnIdRef.current = newActive?.id ?? null;
+
+      setActiveTurn(newActive);
+      setWaitingList(data.waiting || []);
     } catch {
       // Pérdida momentánea de señal — silencioso
     }
@@ -104,6 +113,7 @@ export const useTurnSystemHttp = () => {
     config,
     isLocked,
     metrics,
+    lastCalledCode,
     generateTurn,
     callTurn,
     finishTurn,

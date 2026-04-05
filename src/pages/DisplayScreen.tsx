@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import QRCode from 'react-qr-code';
-import { CheckCircle2, Monitor, Clock, List, History } from 'lucide-react';
+import { CheckCircle2, Monitor, Clock, List, History, Volume2 } from 'lucide-react';
 import { useTurnSystem } from '../hooks/useTurnSystem';
 import { useTurnSystemHttp } from '../hooks/useTurnSystemHttp';
+import { useVoice } from '../hooks/useVoice';
 
 // Detectar si estamos dentro de Electron o en un navegador externo (Smart TV, WiFi)
 const isElectron = typeof window !== 'undefined' && typeof window.electron !== 'undefined';
@@ -21,6 +22,34 @@ export default function DisplayScreen() {
   const httpData = useTurnSystemHttp();
   const { activeTurn, waitingList, historyList, config } = isElectron ? electronData : httpData;
   
+  // === VOZ EN NAVEGADOR ===
+  const { speak } = useVoice();
+  const [audioEnabled, setAudioEnabled] = useState(isElectron); // Electron no necesita gesto
+  const prevCalledCodeRef = useRef<string | null>(null);
+
+  // Cuando el hook HTTP detecta un nuevo turno, disparar voz
+  const lastCalledCode = !isElectron ? httpData.lastCalledCode : null;
+
+  useEffect(() => {
+    if (isElectron || !audioEnabled || !lastCalledCode) return;
+    if (lastCalledCode === prevCalledCodeRef.current) return;
+    prevCalledCodeRef.current = lastCalledCode;
+
+    const readableCode = lastCalledCode.replace('-', ' ');
+    speak(`Atención turno ${readableCode}, favor de pasar a caja.`);
+  }, [lastCalledCode, audioEnabled, speak]);
+
+  // Función para activar audio (requiere gesto del usuario en navegadores)
+  const enableAudio = useCallback(() => {
+    // Hacer un speak vacío para "desbloquear" el audio del navegador
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance('');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    }
+    setAudioEnabled(true);
+  }, []);
+
   // Estado para controlar la vista: 'turn' (Número) o 'ad' (Publicidad)
   const [viewMode, setViewMode] = useState<'turn' | 'ad'>('turn');
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -273,6 +302,20 @@ export default function DisplayScreen() {
         </div>
 
       </div>
+
+      {/* === OVERLAY: ACTIVAR AUDIO (Solo navegador, una vez) === */}
+      {!isElectron && !audioEnabled && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center">
+          <button
+            onClick={enableAudio}
+            className="flex flex-col items-center gap-6 px-16 py-12 rounded-3xl border-2 border-blue-500/50 bg-[#0a0a4a] hover:bg-[#1a1a6a] transition-all duration-300 shadow-2xl hover:shadow-blue-500/30 hover:scale-105 active:scale-95 cursor-pointer"
+          >
+            <Volume2 className="w-20 h-20 text-blue-400 animate-pulse" />
+            <span className="text-3xl font-bold text-white tracking-tight">Activar Audio</span>
+            <span className="text-sm text-zinc-400">Toque para escuchar los anuncios de turno</span>
+          </button>
+        </div>
+      )}
 
     </div>
   );
