@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 
-export const useVoice = () => {
+export const useVoice = (voiceMessageTemplate?: string) => {
   // Función para hablar (Text-to-Speech)
   const speak = useCallback((text: string) => {
     if (!('speechSynthesis' in window)) return;
@@ -36,10 +36,16 @@ export const useVoice = () => {
     const handleRemoteTrigger = (code: string) => {
         if (!code) return;
         
+        // Usar la plantilla personalizada o la predeterminada
+        const template = voiceMessageTemplate || "Atención turno {{turno}}, favor de pasar a caja.";
+        
         // Formatear para que suene natural: "A guión Ciento Uno"
-        // Reemplazamos guiones y aseguramos que se lea bien
         const readableCode = code.replace('-', ' ');
-        speak(`Atención turno ${readableCode}, favor de pasar a caja.`);
+        
+        // Reemplazar la etiqueta dinámica con el código
+        const finalMessage = template.replace('{{turno}}', readableCode);
+        
+        speak(finalMessage);
     };
 
     // Suscribirse al evento

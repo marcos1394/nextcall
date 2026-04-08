@@ -13,11 +13,11 @@ import TurnCard from '../components/TurnCard';
 import QRCode from 'react-qr-code';
 
 export default function AdminPanel() {
-    const { speak } = useVoice();
     const {
         activeTurn, waitingList, historyList, metrics, isLocked, config,
         generateTurn, callTurn, finishTurn, saveSetting
     } = useTurnSystem();
+    useVoice(config.voice_message);
 
     // ESTADOS
     const [activeTab, setActiveTab] = useState<'waiting' | 'history'>('waiting');
@@ -56,8 +56,7 @@ export default function AdminPanel() {
             alert("Error: El folio no existe en la base de datos.");
             return;
         }
-        const readableCode = code.replace('-', ' ');
-        speak(`Atención turno ${readableCode}, favor de pasar.`);
+        // El trigger de voz se hace automático por IPC a través de useVoice (onVoiceTrigger)
     };
 
     const handleRecall = async () => {

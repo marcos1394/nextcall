@@ -35,9 +35,12 @@ export default function DisplayScreen() {
     if (lastCalledCode === prevCalledCodeRef.current) return;
     prevCalledCodeRef.current = lastCalledCode;
 
+    const template = config.voice_message || "Atención turno {{turno}}, favor de pasar a caja.";
     const readableCode = lastCalledCode.replace('-', ' ');
-    speak(`Atención turno ${readableCode}, favor de pasar a caja.`);
-  }, [lastCalledCode, audioEnabled, speak]);
+    const finalMessage = template.replace('{{turno}}', readableCode);
+    
+    speak(finalMessage);
+  }, [lastCalledCode, audioEnabled, speak, config.voice_message]);
 
   // Función para activar audio (requiere gesto del usuario en navegadores)
   const enableAudio = useCallback(() => {

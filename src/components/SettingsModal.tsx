@@ -11,6 +11,7 @@ interface SettingsModalProps {
 export default function SettingsModal({ config, onClose, onSave }: SettingsModalProps) {
   // Estados locales
   const [menuUrl, setMenuUrl] = useState(config.menu_url || '');
+  const [voiceMessage, setVoiceMessage] = useState(config.voice_message || 'Atención turno {{turno}}, favor de pasar a caja.');
   const [adMedia, setAdMedia] = useState(config.ad_image || '');
   const [isVideo, setIsVideo] = useState(config.ad_is_video === 'true'); 
   const [footerImage, setFooterImage] = useState(config.footer_image || '');
@@ -52,6 +53,7 @@ export default function SettingsModal({ config, onClose, onSave }: SettingsModal
 
   const handleSave = async () => {
     await onSave('menu_url', menuUrl);
+    await onSave('voice_message', voiceMessage);
     await onSave('ad_image', adMedia); 
     await onSave('ad_is_video', String(isVideo)); 
     await onSave('footer_image', footerImage);
@@ -179,20 +181,41 @@ export default function SettingsModal({ config, onClose, onSave }: SettingsModal
                     </div>
                 </div>
             
-                {/* SECCIÓN 3: MENÚ */}
-                <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm">
-                    <label className="text-xs font-bold text-[#456df2] uppercase mb-3 block flex gap-2 items-center">
-                        <Link className="w-4 h-4"/> Enlace PDF Menú (QR)
-                    </label>
-                    <div className="flex gap-2">
-                        <input 
-                            value={menuUrl} 
-                            onChange={(e) => setMenuUrl(e.target.value)} 
-                            className="flex-1 border-2 border-zinc-100 bg-zinc-50 p-3 rounded-xl text-sm font-medium focus:outline-none focus:border-[#456df2] transition text-zinc-700" 
-                            placeholder="https://..."
-                        />
+                {/* SECCIÓN 3: MENÚ Y AUDIO */}
+                <div className="grid grid-cols-2 gap-6 mb-8">
+                    {/* Link QR Menú */}
+                    <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm">
+                        <label className="text-xs font-bold text-[#456df2] uppercase mb-3 block flex gap-2 items-center">
+                            <Link className="w-4 h-4"/> Enlace PDF Menú (QR)
+                        </label>
+                        <div className="flex gap-2">
+                            <input 
+                                value={menuUrl} 
+                                onChange={(e) => setMenuUrl(e.target.value)} 
+                                className="flex-1 border-2 border-zinc-100 bg-zinc-50 p-3 rounded-xl text-sm font-medium focus:outline-none focus:border-[#456df2] transition text-zinc-700" 
+                                placeholder="https://..."
+                            />
+                        </div>
+                        <p className="text-[10px] text-zinc-400 mt-2 ml-1">Este enlace generará el código QR en la pantalla.</p>
                     </div>
-                    <p className="text-[10px] text-zinc-400 mt-2 ml-1">Este enlace generará el código QR en la pantalla.</p>
+
+                    {/* Mensaje de Voz (TTS) */}
+                    <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm">
+                        <label className="text-xs font-bold text-[#456df2] uppercase mb-3 block flex gap-2 items-center">
+                            Mensaje de Voz (Llamado)
+                        </label>
+                        <div className="flex gap-2">
+                            <input 
+                                value={voiceMessage} 
+                                onChange={(e) => setVoiceMessage(e.target.value)} 
+                                className="flex-1 border-2 border-zinc-100 bg-zinc-50 p-3 rounded-xl text-sm font-medium focus:outline-none focus:border-[#456df2] transition text-zinc-700" 
+                                placeholder="Atención turno {{turno}}"
+                            />
+                        </div>
+                        <p className="text-[10px] text-zinc-400 mt-2 ml-1">
+                            Usa la etiqueta <strong className="text-[#456df2]">{"{{turno}}"}</strong> donde desees que el asistente lea el número de ticket.
+                        </p>
+                    </div>
                 </div>
             </div>
 
