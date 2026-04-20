@@ -181,9 +181,7 @@ server.post('/api/call', (req, res) => {
 
         logger.info(`📢 Llamado manual creado: ${finalCode}`);
 
-        if (adminWin && !adminWin.isDestroyed()) {
-          adminWin.webContents.send('remote-voice-trigger', finalCode);
-        }
+        notifyAll('remote-voice-trigger', finalCode);
         notifyAll('db-update');
         return res.json({ success: true });
       }
@@ -197,13 +195,11 @@ server.post('/api/call', (req, res) => {
 
     updateTransaction();
 
-    if (adminWin && !adminWin.isDestroyed()) {
-      if (!finalCode) {
-        const t = db.prepare("SELECT code FROM turns WHERE id = ?").get(targetId) as { code: string };
-        finalCode = t?.code;
-      }
-      adminWin.webContents.send('remote-voice-trigger', finalCode);
+    if (!finalCode) {
+      const t = db.prepare("SELECT code FROM turns WHERE id = ?").get(targetId) as { code: string };
+      finalCode = t?.code;
     }
+    notifyAll('remote-voice-trigger', finalCode);
 
     logger.info(`📢 Turno llamado: ${finalCode} (ID: ${targetId})`);
     notifyAll('db-update');

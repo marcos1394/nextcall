@@ -58,7 +58,7 @@ export const useVoice = (voiceMessageTemplate?: string) => {
     }
 
     return () => cleanup();
-  }, [speak]);
+  }, [speak, voiceMessageTemplate]);
 
   return { speak };
 };

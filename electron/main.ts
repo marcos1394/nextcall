@@ -200,6 +200,9 @@ app.whenReady().then(() => {
           if (adminWindow && !adminWindow.isDestroyed()) {
             adminWindow.webContents.send('remote-voice-trigger', finalCode);
           }
+          if (displayWindow && !displayWindow.isDestroyed()) {
+            displayWindow.webContents.send('remote-voice-trigger', finalCode);
+          }
           broadcastUpdate('db-update');
           return true;
         }
@@ -219,6 +222,9 @@ app.whenReady().then(() => {
         }
         if (adminWindow && !adminWindow.isDestroyed()) {
           adminWindow.webContents.send('remote-voice-trigger', finalCode);
+        }
+        if (displayWindow && !displayWindow.isDestroyed()) {
+          displayWindow.webContents.send('remote-voice-trigger', finalCode);
         }
         broadcastUpdate('db-update');
         return true;
