@@ -23,7 +23,7 @@ export default function DisplayScreen() {
   const { activeTurn, waitingList, historyList, config } = isElectron ? electronData : httpData;
   
   // === VOZ EN NAVEGADOR ===
-  const { speak } = useVoice();
+  const { speak } = useVoice(config.voice_message);
   const [audioEnabled, setAudioEnabled] = useState(isElectron); // Electron no necesita gesto
   const prevCalledCodeRef = useRef<string | null>(null);
 
