@@ -29,27 +29,52 @@ export default function DisplayScreen() {
 
   // Cuando el hook HTTP detecta un nuevo turno, disparar voz
   const lastCalledCode = !isElectron ? httpData.lastCalledCode : null;
+  const voiceTimestamp = !isElectron ? httpData.voiceTimestamp : 0;
 
   useEffect(() => {
     if (isElectron || !audioEnabled || !lastCalledCode) return;
     if (lastCalledCode === prevCalledCodeRef.current) return;
     prevCalledCodeRef.current = lastCalledCode;
 
-    const template = config.voice_message || "Atención turno {{turno}}, favor de pasar a caja.";
-    const readableCode = lastCalledCode.replace('-', ' ');
-    const finalMessage = template.replace('{{turno}}', readableCode);
-    
-    speak(finalMessage);
-  }, [lastCalledCode, audioEnabled, speak, config.voice_message]);
+    // Estrategia dual:
+    // 1. Si el navegador soporta speechSynthesis (PC, Chrome, Firefox) → usarla
+    // 2. Si no (Smart TVs: WebOS, Tizen, VIDAA) → reproducir WAV del servidor
+    if ('speechSynthesis' in window && window.speechSynthesis.getVoices().length > 0) {
+      const template = config.voice_message || "Atención turno {{turno}}, favor de pasar a caja.";
+      const readableCode = lastCalledCode.replace('-', ' ');
+      const finalMessage = template.replace('{{turno}}', readableCode);
+      speak(finalMessage);
+    } else {
+      // Fallback: reproducir el audio WAV generado por el servidor
+      const audioUrl = `/api/voice/latest.wav?t=${voiceTimestamp || Date.now()}`;
+      const audio = new Audio(audioUrl);
+      audio.play().catch(err => console.warn('Error reproduciendo audio en TV:', err));
+    }
+  }, [lastCalledCode, audioEnabled, speak, config.voice_message, voiceTimestamp]);
 
   // Función para activar audio (requiere gesto del usuario en navegadores)
   const enableAudio = useCallback(() => {
-    // Hacer un speak vacío para "desbloquear" el audio del navegador
+    // Desbloquear audio según las capacidades del navegador
     if ('speechSynthesis' in window) {
+      // Navegador con TTS (PC, Chrome, Firefox)
       const u = new SpeechSynthesisUtterance('');
       u.volume = 0;
       window.speechSynthesis.speak(u);
     }
+
+    // Desbloquear AudioContext para <audio> (necesario en Smart TVs)
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      ctx.resume();
+    } catch (e) {
+      console.warn('AudioContext unlock falló (no crítico):', e);
+    }
+
     setAudioEnabled(true);
   }, []);
 

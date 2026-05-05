@@ -5,6 +5,58 @@ import db from './database';
 import { getLocalIp, logger } from './logger';
 import path from 'path';
 import fs from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
+// === VOICE AUDIO GENERATION (Server-side TTS para Smart TVs) ===
+// Las Smart TVs no soportan window.speechSynthesis, así que generamos
+// el audio aquí con Windows SAPI y lo servimos como WAV por HTTP.
+const voiceFilePath = path.join(app.getPath('temp'), 'nextcall_voice.wav');
+let voiceTimestamp = 0;
+let isGenerating = false;
+
+async function generateVoiceAudio(text: string): Promise<void> {
+  if (isGenerating) {
+    logger.info('🔇 Generación de voz en progreso, descartando solicitud anterior.');
+    return;
+  }
+
+  isGenerating = true;
+
+  try {
+    // Escapar comillas simples para PowerShell
+    const safeText = text.replace(/'/g, "''");
+    const safeFilePath = voiceFilePath.replace(/\\/g, '\\\\');
+
+    // PowerShell: usar System.Speech.Synthesis para generar WAV
+    const psScript = [
+      "Add-Type -AssemblyName System.Speech",
+      "$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer",
+      `$synth.SetOutputToWaveFile('${safeFilePath}')`,
+      "$synth.Rate = -2",  // Velocidad lenta para claridad (rango -10 a 10)
+      `$synth.Speak('${safeText}')`,
+      "$synth.Dispose()",
+    ].join('; ');
+
+    await execAsync(`powershell -NoProfile -Command "${psScript}"`, {
+      timeout: 10000,  // 10s máximo
+    });
+
+    // Solo actualizar timestamp DESPUÉS de confirmar que el archivo existe
+    if (fs.existsSync(voiceFilePath)) {
+      voiceTimestamp = Date.now();
+      logger.info(`🔊 Audio generado: ${voiceFilePath} (ts: ${voiceTimestamp})`);
+    } else {
+      logger.error('❌ El archivo WAV no fue creado por PowerShell.');
+    }
+  } catch (err) {
+    logger.error(`❌ Error generando audio TTS: ${err}`);
+  } finally {
+    isGenerating = false;
+  }
+}
 
 const server = express();
 const PORT = 3000;
@@ -79,6 +131,19 @@ server.get('/api/health', (_req, res) => {
   });
 });
 
+// === VOICE AUDIO ENDPOINT (Para Smart TVs) ===
+server.get('/api/voice/latest.wav', (_req, res) => {
+  if (fs.existsSync(voiceFilePath)) {
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(voiceFilePath);
+  } else {
+    res.status(404).json({ error: 'No voice file available' });
+  }
+});
+
 // === CONFIG ENDPOINT (Para navegadores / Smart TV) ===
 server.get('/api/config', (_req, res) => {
   try {
@@ -127,7 +192,7 @@ server.get('/api/turns', (_req, res) => {
   try {
     const waiting = db.prepare("SELECT * FROM turns WHERE status = 'waiting' ORDER BY id ASC").all();
     const active = db.prepare("SELECT * FROM turns WHERE status = 'active' LIMIT 1").get();
-    res.json({ waiting, active });
+    res.json({ waiting, active, voiceTimestamp });
   } catch (e) {
     logger.error(`Error en GET /api/turns: ${e}`);
     res.status(500).json({ error: 'DB Error' });
@@ -157,7 +222,7 @@ server.post('/api/turns', (req, res) => {
 });
 
 // 3. LLAMAR / VOCEAR
-server.post('/api/call', (req, res) => {
+server.post('/api/call', async (req, res) => {
   const { id, code } = req.body;
 
   try {
@@ -183,6 +248,10 @@ server.post('/api/call', (req, res) => {
 
         notifyAll('remote-voice-trigger', finalCode);
         notifyAll('db-update');
+
+        // Generar audio WAV para Smart TVs (async, no bloquea)
+        await generateVoiceForTurn(finalCode);
+
         return res.json({ success: true });
       }
     }
@@ -203,6 +272,10 @@ server.post('/api/call', (req, res) => {
 
     logger.info(`📢 Turno llamado: ${finalCode} (ID: ${targetId})`);
     notifyAll('db-update');
+
+    // Generar audio WAV para Smart TVs (async, no bloquea)
+    await generateVoiceForTurn(finalCode);
+
     res.json({ success: true });
 
   } catch (e) {
@@ -210,6 +283,21 @@ server.post('/api/call', (req, res) => {
     res.status(500).json({ error: 'Error calling' });
   }
 });
+
+// Helper: generar el mensaje de voz y el archivo WAV
+async function generateVoiceForTurn(turnCode: string): Promise<void> {
+  try {
+    // Leer la plantilla de voz del config, o usar la predeterminada
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'voice_message'").get() as { value: string } | undefined;
+    const template = settingRow?.value || 'Atención turno {{turno}}, favor de pasar a caja.';
+    const readableCode = turnCode.replace('-', ' ');
+    const finalMessage = template.replace('{{turno}}', readableCode);
+
+    await generateVoiceAudio(finalMessage);
+  } catch (err) {
+    logger.error(`Error en generateVoiceForTurn: ${err}`);
+  }
+}
 
 // 4. COMPLETAR TURNO
 server.post('/api/complete', (req, res) => {

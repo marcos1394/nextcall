@@ -26,6 +26,7 @@ export const useTurnSystemHttp = () => {
 
   // Tracking de cambio de turno para disparar voz en el navegador
   const [lastCalledCode, setLastCalledCode] = useState<string | null>(null);
+  const [voiceTimestamp, setVoiceTimestamp] = useState<number>(0);
   const prevTurnIdRef = useRef<number | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -46,6 +47,11 @@ export const useTurnSystemHttp = () => {
         setLastCalledCode(newActive.code);
       }
       prevTurnIdRef.current = newActive?.id ?? null;
+
+      // Leer el timestamp del audio generado en el servidor
+      if (data.voiceTimestamp) {
+        setVoiceTimestamp(data.voiceTimestamp);
+      }
 
       setActiveTurn(newActive);
       setWaitingList(data.waiting || []);
@@ -114,6 +120,7 @@ export const useTurnSystemHttp = () => {
     isLocked,
     metrics,
     lastCalledCode,
+    voiceTimestamp,
     generateTurn,
     callTurn,
     finishTurn,
