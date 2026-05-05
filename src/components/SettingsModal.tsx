@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useRef, useState } from 'react';
-import { X, Palette, LayoutTemplate, Video, Upload, Image as ImageIcon, Link } from 'lucide-react';
+import { X, Palette, LayoutTemplate, Video, Upload, Image as ImageIcon, Link, Trash2, Plus } from 'lucide-react';
 
 interface SettingsModalProps {
   config: any;
@@ -12,11 +12,21 @@ export default function SettingsModal({ config, onClose, onSave }: SettingsModal
   // Estados locales
   const [menuUrl, setMenuUrl] = useState(config.menu_url || '');
   const [voiceMessage, setVoiceMessage] = useState(config.voice_message || 'Atención turno {{turno}}, favor de pasar a caja.');
-  const [adMedia, setAdMedia] = useState(config.ad_image || '');
   const [isVideo, setIsVideo] = useState(config.ad_is_video === 'true'); 
   const [footerImage, setFooterImage] = useState(config.footer_image || '');
   const [logo, setLogo] = useState(config.restaurant_logo || '');
   const [brandColor, setBrandColor] = useState(config.brand_color || '#456df2');
+
+  // Multi-video playlist
+  const [adVideoList, setAdVideoList] = useState<string[]>(() => {
+    try {
+      if (config.ad_videos) {
+        const parsed = JSON.parse(config.ad_videos);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch { /* ignore */ }
+    return config.ad_image ? [config.ad_image] : [];
+  });
 
   // Referencias
   const adInputRef = useRef<HTMLInputElement>(null);
@@ -29,7 +39,7 @@ export default function SettingsModal({ config, onClose, onSave }: SettingsModal
       dark: '#000033',
   };
 
-  // Manejador de Archivos (Imagen o Video)
+  // Manejador de Archivos (Imagen o Video) para single uploads
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void, isAd = false) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -51,11 +61,37 @@ export default function SettingsModal({ config, onClose, onSave }: SettingsModal
     }
   };
 
+  // Manejador para agregar video/imagen a la playlist
+  const handleAddToPlaylist = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const limit = file.type.startsWith('video') ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > limit) {
+      alert("El archivo es muy pesado. Máximo 20MB para video / 5MB para imagen.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAdVideoList(prev => [...prev, reader.result as string]);
+      if (file.type.startsWith('video')) setIsVideo(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeFromPlaylist = (index: number) => {
+    setAdVideoList(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSave = async () => {
     await onSave('menu_url', menuUrl);
     await onSave('voice_message', voiceMessage);
-    await onSave('ad_image', adMedia); 
+    // Guardar primer video como ad_image (backward compatible)
+    await onSave('ad_image', adVideoList[0] || ''); 
     await onSave('ad_is_video', String(isVideo)); 
+    // Guardar playlist completa como JSON array
+    await onSave('ad_videos', JSON.stringify(adVideoList));
     await onSave('footer_image', footerImage);
     await onSave('restaurant_logo', logo);
     await onSave('brand_color', brandColor);
@@ -127,34 +163,44 @@ export default function SettingsModal({ config, onClose, onSave }: SettingsModal
                 <div className="mb-8">
                     <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-4 pl-1">Pantalla TV & Publicidad</h3>
                     <div className="grid grid-cols-2 gap-6">
-                        {/* Ads Media */}
+                        {/* Ads Media — Playlist */}
                         <div className="p-6 bg-white rounded-2xl border border-zinc-200 shadow-sm">
                             <label className="text-xs font-bold text-[#456df2] uppercase mb-4 flex gap-2 items-center">
-                                <Video className="w-4 h-4"/> Publicidad (Full Screen)
+                                <Video className="w-4 h-4"/> Publicidad (Playlist)
                             </label>
+                            <p className="text-[10px] text-zinc-400 mb-3">Sube uno o varios videos/imágenes. Se reproducirán en secuencia continua en la TV.</p>
                             
-                            <div className="aspect-video bg-zinc-50 rounded-xl border-2 border-dashed border-zinc-200 flex items-center justify-center overflow-hidden relative mb-4 group hover:border-[#456df2]/50 transition">
-                                {adMedia ? (
-                                    isVideo ? (
-                                        <video src={adMedia} className="w-full h-full object-cover" autoPlay loop muted />
-                                    ) : (
-                                        <img src={adMedia} className="w-full h-full object-cover" />
-                                    )
-                                ) : (
-                                    <div className="text-center">
-                                        <Upload className="w-8 h-8 text-zinc-300 mx-auto mb-2"/>
-                                        <span className="text-xs text-zinc-400 font-bold uppercase">Vacío</span>
+                            {/* Lista de videos/imágenes actuales */}
+                            {adVideoList.length > 0 && (
+                              <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                                {adVideoList.map((src, idx) => (
+                                  <div key={idx} className="flex items-center gap-3 p-2 bg-zinc-50 rounded-xl border border-zinc-100 group">
+                                    <div className="w-20 h-12 bg-zinc-200 rounded-lg overflow-hidden shrink-0">
+                                      {src.startsWith('data:video') ? (
+                                        <video src={src} className="w-full h-full object-cover" muted />
+                                      ) : (
+                                        <img src={src} className="w-full h-full object-cover" />
+                                      )}
                                     </div>
-                                )}
-                                
-                                {adMedia && <button onClick={() => setAdMedia('')} className="absolute inset-0 bg-black/60 text-white opacity-0 group-hover:opacity-100 font-bold text-xs transition flex items-center justify-center">Eliminar Medio</button>}
-                            </div>
+                                    <span className="text-xs font-bold text-zinc-500 flex-1">
+                                      {src.startsWith('data:video') ? `Video ${idx + 1}` : `Imagen ${idx + 1}`}
+                                    </span>
+                                    <button 
+                                      onClick={() => removeFromPlaylist(idx)} 
+                                      className="p-1.5 hover:bg-red-50 rounded-lg text-zinc-300 hover:text-red-500 transition"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
 
-                            <input type="file" ref={adInputRef} className="hidden" accept="image/*,video/mp4,video/webm" onChange={(e) => handleFileUpload(e, setAdMedia, true)}/>
+                            <input type="file" ref={adInputRef} className="hidden" accept="image/*,video/mp4,video/webm" onChange={handleAddToPlaylist}/>
                             <button onClick={() => adInputRef.current?.click()} className="w-full bg-[#000033] text-white py-3 rounded-xl text-xs font-bold hover:opacity-90 transition shadow-lg shadow-indigo-100 flex justify-center gap-2 items-center">
-                                <Upload className="w-3 h-3"/> Subir Foto o Video
+                                <Plus className="w-3 h-3"/> {adVideoList.length > 0 ? 'Agregar Otro Video/Imagen' : 'Subir Video o Imagen'}
                             </button>
-                            <p className="text-[10px] text-zinc-400 mt-2 text-center">MP4 (Max 20MB) o JPG/PNG (Max 5MB)</p>
+                            <p className="text-[10px] text-zinc-400 mt-2 text-center">MP4 (Max 20MB) o JPG/PNG (Max 5MB) por archivo</p>
                         </div>
 
                         {/* Footer Banner */}

@@ -79,14 +79,36 @@ export default function DisplayScreen() {
   }, []);
 
   // Estado para controlar la vista: 'turn' (Número) o 'ad' (Publicidad)
-  const [viewMode, setViewMode] = useState<'turn' | 'ad'>('turn');
+  // DEFAULT: 'ad' — el video/publicidad corre continuamente
+  const [viewMode, setViewMode] = useState<'turn' | 'ad'>('ad');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const turnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevActiveTurnIdRef = useRef<number | null>(null);
+
+  // === MULTI-VIDEO PLAYLIST ===
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
 
   // === CONFIGURACIÓN Y COLORES NEXTCALL ===
   const menuUrl = config.menu_url || "https://www.mercadopago.com.mx"; 
   const adMedia = config.ad_image;        // Puede ser Imagen o Video (Base64)
   const footerImage = config.footer_image;  // Banner Inferior
   const logo = config.restaurant_logo;      // Logo del Restaurante
+  
+  // Soporte multi-video: ad_videos es un JSON array de base64 strings, ad_image es single
+  const adVideoList: string[] = (() => {
+    try {
+      if (config.ad_videos) {
+        const parsed = JSON.parse(config.ad_videos);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { /* ignore parse errors */ }
+    // Fallback: usar ad_image como único video/imagen
+    return adMedia ? [adMedia] : [];
+  })();
+
+  const currentAdSrc = adVideoList[currentVideoIndex] || null;
+  const hasAds = adVideoList.length > 0;
+  const isVideoAd = config.ad_is_video === 'true' || isVideoFile(currentAdSrc || undefined);
   
   // Colores de la marca NextCall (o personalizados si vienen de config)
   const brandColor = config.brand_color || '#456df2'; 
@@ -97,32 +119,55 @@ export default function DisplayScreen() {
       panel: '#0a0a4a',         // Un tono un poco más claro para paneles
   };
 
-  const isVideoAd = config.ad_is_video === 'true' || isVideoFile(adMedia);
-
-  // === LÓGICA DE ROTACIÓN (INTACTA) ===
+  // === LÓGICA DE ROTACIÓN: VIDEO CONTINUO + TURNO 20s ===
+  // El video corre siempre. Si llaman un turno → se muestra 20s → vuelve al video.
   useEffect(() => {
-    // 1. Prioridad: Si cambia el turno (o hacen Recall), FORZAMOS mostrar el número
+    // Solo reaccionar cuando CAMBIA el turno activo (nuevo call o recall)
+    const newId = activeTurn?.id ?? null;
+    if (newId === prevActiveTurnIdRef.current) return;
+    prevActiveTurnIdRef.current = newId;
+
+    if (!activeTurn) return; // No hay turno, dejar el video
+
+    // PAUSAR video (se reanuda donde quedó)
+    if (videoRef.current && !videoRef.current.paused) {
+      videoRef.current.pause();
+    }
+
+    // Mostrar turno
     setViewMode('turn');
 
-    // 2. Solo si hay publicidad, iniciamos el ciclo
-    if (adMedia) {
-      const cycleInterval = setInterval(() => {
-        setViewMode(current => {
-           return current === 'turn' ? 'ad' : 'turn';
-        });
-      }, 15000); // 15 segundos por vista
+    // Limpiar timer anterior
+    if (turnTimerRef.current) clearTimeout(turnTimerRef.current);
 
-      return () => clearInterval(cycleInterval);
-    }
-  }, [activeTurn, adMedia]); 
+    // Después de 20 segundos → volver al video
+    turnTimerRef.current = setTimeout(() => {
+      setViewMode('ad');
+    }, 20000); // 20 segundos
 
-  // Efecto para reproducir video cuando entra en vista
+    return () => {
+      if (turnTimerRef.current) clearTimeout(turnTimerRef.current);
+    };
+  }, [activeTurn]);
+
+  // Efecto: reanudar video cuando volvemos a modo 'ad' (SIN reiniciar)
   useEffect(() => {
     if (viewMode === 'ad' && isVideoAd && videoRef.current) {
-        videoRef.current.currentTime = 0;
+        // NO hacer currentTime = 0 → el video continúa donde se quedó
         videoRef.current.play().catch(e => console.log("Auto-play prevented", e));
     }
   }, [viewMode, isVideoAd]);
+
+  // Multi-video: cuando un video termina, avanzar al siguiente
+  const handleVideoEnded = useCallback(() => {
+    if (adVideoList.length > 1) {
+      setCurrentVideoIndex(prev => (prev + 1) % adVideoList.length);
+    } else if (videoRef.current) {
+      // Si es un solo video, repetir (loop)
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [adVideoList.length]);
 
   // Cálculo de tamaño de fuente
   const getFontSize = (text: string) => {
@@ -206,20 +251,21 @@ export default function DisplayScreen() {
                 </main>
             </div>
 
-            {/* VISTA B: PUBLICIDAD FULL SCREEN */}
-            {adMedia && (
+            {/* VISTA B: PUBLICIDAD FULL SCREEN (VIDEO CONTINUO) */}
+            {hasAds && (
                 <div className={`absolute inset-0 transition-all duration-1000 transform ${viewMode === 'ad' ? 'opacity-100 scale-100 z-20' : 'opacity-0 scale-105 z-0'}`}>
                     {isVideoAd ? (
                         <video 
                             ref={videoRef}
-                            src={adMedia} 
+                            src={currentAdSrc || undefined} 
                             className="w-full h-full object-cover" 
                             muted 
-                            loop 
+                            autoPlay
                             playsInline
+                            onEnded={handleVideoEnded}
                         />
                     ) : (
-                        <img src={adMedia} className="w-full h-full object-cover opacity-95" alt="Publicidad" />
+                        <img src={currentAdSrc || undefined} className="w-full h-full object-cover opacity-95" alt="Publicidad" />
                     )}
                     
                     {/* Degradado sutil */}
