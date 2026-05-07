@@ -83,7 +83,6 @@ export default function DisplayScreen() {
   const [viewMode, setViewMode] = useState<'turn' | 'ad'>('ad');
   const videoRef = useRef<HTMLVideoElement>(null);
   const turnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevActiveTurnIdRef = useRef<number | null>(null);
 
   // === MULTI-VIDEO PLAYLIST ===
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
@@ -121,13 +120,11 @@ export default function DisplayScreen() {
 
   // === LÓGICA DE ROTACIÓN: VIDEO CONTINUO + TURNO 20s ===
   // El video corre siempre. Si llaman un turno → se muestra 20s → vuelve al video.
-  useEffect(() => {
-    // Solo reaccionar cuando CAMBIA el turno activo (nuevo call o recall)
-    const newId = activeTurn?.id ?? null;
-    if (newId === prevActiveTurnIdRef.current) return;
-    prevActiveTurnIdRef.current = newId;
+  const activeTurnId = activeTurn?.id ?? null;
 
-    if (!activeTurn) return; // No hay turno, dejar el video
+  useEffect(() => {
+    // Solo reaccionar cuando CAMBIA el ID del turno activo (nuevo call o recall)
+    if (activeTurnId === null) return; // No hay turno, dejar el video
 
     // PAUSAR video (se reanuda donde quedó)
     if (videoRef.current && !videoRef.current.paused) {
@@ -137,18 +134,22 @@ export default function DisplayScreen() {
     // Mostrar turno
     setViewMode('turn');
 
-    // Limpiar timer anterior
+    // Limpiar timer anterior si existe
     if (turnTimerRef.current) clearTimeout(turnTimerRef.current);
 
     // Después de 20 segundos → volver al video
     turnTimerRef.current = setTimeout(() => {
       setViewMode('ad');
+      turnTimerRef.current = null;
     }, 20000); // 20 segundos
 
     return () => {
-      if (turnTimerRef.current) clearTimeout(turnTimerRef.current);
+      if (turnTimerRef.current) {
+        clearTimeout(turnTimerRef.current);
+        turnTimerRef.current = null;
+      }
     };
-  }, [activeTurn]);
+  }, [activeTurnId]); // ← CLAVE: usar el ID primitivo, NO el objeto completo
 
   // Efecto: reanudar video cuando volvemos a modo 'ad' (SIN reiniciar)
   useEffect(() => {
